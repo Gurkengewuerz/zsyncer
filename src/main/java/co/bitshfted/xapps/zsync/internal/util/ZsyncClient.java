@@ -28,6 +28,7 @@ package co.bitshfted.xapps.zsync.internal.util;
 
 import co.bitshfted.xapps.zsync.http.ContentRange;
 import co.bitshfted.xapps.zsync.http.Credentials;
+import co.bitshfted.xapps.zsync.internal.EventDispatcher;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
@@ -126,12 +127,12 @@ public class ZsyncClient {
    * @throws IOException
    * @throws HttpError
    */
-  public void get(URI uri, Path output, Map<String, ? extends Credentials> credentials, String useragent, HttpTransferListener listener)
+  public void get(URI uri, Path output, Map<String, ? extends Credentials> credentials, String useragent, EventDispatcher events)
       throws IOException, HttpError, InterruptedException {
     final Path parent = output.getParent();
     final Path tmp = parent.resolve(output.getFileName() + ".part");
     Files.createDirectories(parent);
-    try (InputStream in = this.get(uri, credentials, useragent, listener)) {
+    try (InputStream in = this.get(uri, credentials, useragent, events)) {
       Files.copy(in, tmp, REPLACE_EXISTING);
     }
     Files.move(tmp, output, REPLACE_EXISTING, ATOMIC_MOVE);
@@ -143,14 +144,15 @@ public class ZsyncClient {
    *
    * @param uri The URI of the resource to retrieve
    * @param credentials The credentials for authenticating with remote hosts
-   * @param listener Listener to monitor long running transfers
+   * @param events Listener to monitor long running transfers
    * @return
    * @throws IOException
    * @throws HttpError
    */
-  public InputStream get(URI uri, Map<String, ? extends Credentials> credentials, String useragent, HttpTransferListener listener)
+  public InputStream get(URI uri, Map<String, ? extends Credentials> credentials, String useragent, EventDispatcher events)
       throws IOException, HttpError, InterruptedException {
-    final HttpResponse<byte[]> response = executeWithAuthRetry(uri, credentials, useragent, listener, Collections.<ContentRange>emptyList());
+    final HttpTransferListener listener = events.getControlFileDownloadListener();
+    final HttpResponse<byte[]> response = executeWithAuthRetry(uri, credentials, useragent, listener, events, Collections.emptyList());
     final int code = response.statusCode();
     if (code != HTTP_OK) {
       throw new HttpError("Request failed", code);
@@ -164,17 +166,20 @@ public class ZsyncClient {
    * @param uri
    * @param ranges
    * @param receiver
-   * @param listener
+   * @param events
    * @throws IOException
    * @throws HttpError
    */
   public void partialGet(URI uri, List<ContentRange> ranges, Map<String, ? extends Credentials> credentials, String useragent,
-      RangeReceiver receiver, RangeTransferListener listener) throws IOException, HttpError, InterruptedException {
+      RangeReceiver receiver, EventDispatcher events) throws IOException, HttpError, InterruptedException {
     final Set<ContentRange> remaining = new LinkedHashSet<>(ranges);
+    final RangeTransferListener listener = events.getRemoteFileDownloadListener();
+    long contentSize = ranges.stream().mapToLong(ContentRange::length).sum();
+    events.bytesToDownload(contentSize);
     while (!remaining.isEmpty()) {
       final List<ContentRange> next = remaining.stream().limit(min(remaining.size(), MAXIMUM_RANGES_PER_HTTP_REQUEST)).collect(Collectors.toList());
       final HttpTransferListener requestListener = listener.newTransfer(next);
-      final HttpResponse<byte[]> response = executeWithAuthRetry(uri, credentials, useragent, requestListener, next);
+      final HttpResponse<byte[]> response = executeWithAuthRetry(uri, credentials, useragent, requestListener, events, next);
       final int code = response.statusCode();
       // tolerate case that server does not support range requests
       if (code == HTTP_OK) {
@@ -197,10 +202,10 @@ public class ZsyncClient {
   }
 
   HttpResponse<byte[]> executeWithAuthRetry(URI uri, Map<String, ? extends Credentials> credentials, String useragent, HttpTransferListener listener,
-                                                 List<ContentRange> ranges) throws IOException, InterruptedException {
+                                                 EventDispatcher events, List<ContentRange> ranges) throws IOException, InterruptedException {
     HttpRequest request = buildRequest(uri, credentials, useragent, ranges);
     listener.initiating(request);
-    HttpResponse<byte[]> response = this.httpClient.send(request, HttpResponse.BodyHandlers.ofByteArray());
+    HttpResponse<byte[]> response = buildResponse(request, events);
     for (int i = 0; i < 10; i++) {
       final int code = response.statusCode();
       if (!((code == HTTP_UNAUTHORIZED || code == HTTP_PROXY_AUTH) && containsBasic(response.headers().firstValue("WWW-Authenticate").orElse("")))) {
@@ -215,9 +220,17 @@ public class ZsyncClient {
       }
       final String name = code == HTTP_UNAUTHORIZED ? "Authorization" : "Proxy-Authorization";
       request = response.request().newBuilder().header(name, creds.basic()).build();
-      response = this.httpClient.send(request, HttpResponse.BodyHandlers.ofByteArray());
+      response = buildResponse(request, events);
     }
     return response;
+  }
+
+  HttpResponse<byte[]> buildResponse(HttpRequest request, EventDispatcher events) throws IOException, InterruptedException {
+    return this.httpClient.send(request, responseInfo -> {
+      HttpResponse.BodyHandler<byte[]> bodyHandler = HttpResponse.BodyHandlers.ofByteArray();
+      final long contentSize = Long.parseLong(responseInfo.headers().firstValue("content-length").orElse("0"));
+      return new HTTPObserver(bodyHandler.apply(responseInfo), contentSize, events);
+    });
   }
 
   HttpRequest buildRequest(URI uri, Map<String, ? extends Credentials> credentials, String useragent, List<ContentRange> ranges) {

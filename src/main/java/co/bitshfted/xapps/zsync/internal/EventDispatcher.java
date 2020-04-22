@@ -69,6 +69,14 @@ public class EventDispatcher {
 		this.observer.zsyncComplete();
 	}
 
+	public void bytesToDownload(long changed) {
+		this.observer.bytesToDownload(changed);
+	}
+
+	public void download(long bytes) {
+		this.observer.downloaded(bytes);
+	}
+
 	public TransferListener.ResourceTransferListener<Path> getControlFileReadListener() {
 		return new TransferListener.ResourceTransferListener<Path>() {
 			@Override

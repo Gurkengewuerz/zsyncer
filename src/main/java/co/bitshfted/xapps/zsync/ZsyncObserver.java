@@ -76,4 +76,8 @@ public class ZsyncObserver {
   public void zsyncFailed(Exception exception) {}
 
   public void zsyncComplete() {}
+
+  public void bytesToDownload(long bytes) {}
+
+  public void downloaded(long bytes) {}
 }

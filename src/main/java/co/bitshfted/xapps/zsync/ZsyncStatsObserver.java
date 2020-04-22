@@ -69,6 +69,9 @@ public class ZsyncStatsObserver extends ZsyncObserver {
 
     Map<List<ContentRange>, Long> getElapsedMillisecondsDownloadingRemoteFileByRequest();
 
+    long getBytesToDownload();
+
+    long getDownloaded();
   }
 
 
@@ -101,6 +104,9 @@ public class ZsyncStatsObserver extends ZsyncObserver {
   private Path inputFile;
   private long bytesReadBefore;
   private long bytesWrittenBefore;
+
+  private long bytesToDownload;
+  private long downloaded;
 
   @Override
   public void zsyncStarted(URI requestedZsyncUri, Options options) {
@@ -212,6 +218,16 @@ public class ZsyncStatsObserver extends ZsyncObserver {
     this.stopwatch.stop();
   }
 
+  @Override
+  public void bytesToDownload(long bytes) {
+    this.bytesToDownload = bytes;
+  }
+
+  @Override
+  public void downloaded(long bytes) {
+    this.downloaded += bytes;
+  }
+
   public ZsyncStats build() {
     final Map<Path, Long> bytesWrittenByInputFile = Collections.unmodifiableMap(this.bytesWrittenByInputFile);
     final Map<Path, Long> bytesReadByInputFile = Collections.unmodifiableMap(this.bytesReadByInputFile);
@@ -225,6 +241,8 @@ public class ZsyncStatsObserver extends ZsyncObserver {
     final long bytesDownloadedFromRemoteTarget = this.bytesDownloadedFromRemoteTarget;
     final long totalBytesRead = this.totalBytesRead;
     final long totalBytesWritten = this.totalBytesWritten;
+    final long bytesToDownload = this.bytesToDownload;
+    final long downloaded = this.downloaded;
 
     return new ZsyncStats() {
       @Override
@@ -285,6 +303,16 @@ public class ZsyncStatsObserver extends ZsyncObserver {
       @Override
       public Map<List<ContentRange>, Long> getElapsedMillisecondsDownloadingRemoteFileByRequest() {
         return elapsedMillisByRangeRequest;
+      }
+
+      @Override
+      public long getBytesToDownload() {
+        return bytesToDownload;
+      }
+
+      @Override
+      public long getDownloaded() {
+        return downloaded;
       }
     };
   }

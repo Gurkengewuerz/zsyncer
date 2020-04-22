@@ -355,7 +355,7 @@ public class Zsync {
         new OutputFileWriter(outputFile, controlFile, events.getOutputFileWriteListener())) {
       if (!this.processInputFiles(outputFileWriter, controlFile, options.getInputFiles(), events)) {
         this.zsyncClient.partialGet(remoteFileUri, outputFileWriter.getMissingRanges(), options.getCredentials(),
-                options.getUseragent(), events.getRangeReceiverListener(outputFileWriter), events.getRemoteFileDownloadListener());
+                options.getUseragent(), events.getRangeReceiverListener(outputFileWriter), events);
       }
     } catch (ChecksumValidationIOException exception) {
       throw new ZsyncChecksumValidationFailedException("Calculated checksum does not match expected checksum");
@@ -392,15 +392,14 @@ public class Zsync {
       if (path == null) {
         // TODO we may want to set the redirect URL resulting from processing the http request
         options.setZsyncFileSource(zsyncFile);
-        final ZsyncClient.HttpTransferListener listener = events.getControlFileDownloadListener();
         final Map<String, Credentials> credentials = options.getCredentials();
         // check if we should persist the file locally
         final Path savePath = options.getSaveZsyncFile();
         final String useragent = options.getUseragent();
         if (savePath == null) {
-          in = zsyncClient.get(zsyncFile, credentials, useragent, listener);
+          in = zsyncClient.get(zsyncFile, credentials, useragent, events);
         } else {
-          zsyncClient.get(zsyncFile, savePath, credentials, useragent, listener);
+          zsyncClient.get(zsyncFile, savePath, credentials, useragent, events);
           in = this.openZsyncFile(savePath, events);
         }
       } else {
@@ -515,5 +514,7 @@ public class Zsync {
         + ")");
     System.out.println("Total time: " + stats.getTotalElapsedMilliseconds() + " ms. Of which downloading "
         + stats.getElapsedMillisecondsDownloading() + " ms");
+    System.out.println("Bytes to download for remote file: " + stats.getBytesToDownload() + " Bytes downloaded: "
+        + stats.getDownloaded());
   }
 }
